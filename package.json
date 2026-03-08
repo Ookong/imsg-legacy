@@ -1,0 +1,32 @@
+{
+  "name": "imsg",
+  "version": "1.0.0",
+  "description": "iMessage CLI tool for macOS 11+ (Big Sur)",
+  "main": "src/index.js",
+  "bin": {
+    "imsg": "./src/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Tests not implemented yet\" && exit 1"
+  },
+  "keywords": [
+    "imessage",
+    "macos",
+    "messages",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "chokidar": "^3.5.0",
+    "commander": "^11.0.0",
+    "libphonenumber-js": "^1.10.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin"
+  ]
+}
