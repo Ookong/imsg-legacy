@@ -38,11 +38,18 @@ echo "✓ macOS version compatible: $(sw_vers -productVersion)"
 
 # Install dependencies
 echo "Installing dependencies..."
-npm install
+if ! npm install; then
+    echo "Error: Failed to install dependencies"
+    echo "Try running: npm install"
+    exit 1
+fi
 
 # Create symlink
 echo "Creating global command..."
-npm link
+if ! npm link; then
+    echo "Error: Failed to create global command"
+    exit 1
+fi
 
 echo ""
 echo "✓ Installation complete!"
