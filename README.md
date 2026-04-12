@@ -34,8 +34,8 @@ This implementation maintains **full compatibility** with the original imsg (Swi
 ### From Source
 
 ```bash
-git clone https://github.com/your-username/imsg.git
-cd imsg
+git clone https://github.com/ookong/imsg-legacy.git
+cd imsg-legacy
 npm install
 npm link
 ```
