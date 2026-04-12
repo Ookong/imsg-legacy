@@ -1,6 +1,6 @@
 {
   "name": "imsg",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "iMessage CLI tool for macOS 11+ (Big Sur)",
   "main": "src/index.js",
   "bin": {
