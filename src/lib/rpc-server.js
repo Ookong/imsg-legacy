@@ -26,6 +26,27 @@ class RPCServer {
   }
 
   /**
+   * Build a JSON-RPC 2.0 error envelope string for a startup-time failure.
+   *
+   * v0.8.2 of upstream imsg made stdout strictly JSONL even when the
+   * server cannot start: OpenClaw's client reads the first line, and an
+   * envelope here lets it surface a parsed error instead of a bare
+   * "imsg rpc exited (code 1)". `id` is null per JSON-RPC 2.0 §5.1.
+   */
+  static buildStartupErrorEnvelope(error) {
+    const msg = (error && error.message) || String(error);
+    return JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: {
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: msg,
+        data: { phase: 'startup', stage: 'db_connect' }
+      }
+    });
+  }
+
+  /**
    * Run the RPC server (main loop)
    */
   async run() {
