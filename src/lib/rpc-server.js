@@ -292,7 +292,20 @@ class RPCServer {
    * Handle watch.subscribe method
    */
   async handleWatchSubscribe(id, params) {
-    const { chat_id = null, since_rowid, participants, attachments = false, include_reactions = false } = params;
+    const {
+      chat_id = null,
+      since_rowid,
+      participants,
+      attachments = false,
+      include_reactions = false,
+      debounce_ms
+    } = params;
+
+    // v0.6.0 contract: client may set debounce_ms; default 500ms (matches
+    // upstream's watcher debounce). Clamp tiny values to 50ms so a
+    // client-side bug can't turn this into a poll-storm.
+    let resolvedDebounceMs = typeof debounce_ms === 'number' ? debounce_ms : 500;
+    if (resolvedDebounceMs < 50) resolvedDebounceMs = 50;
 
     try {
       const watcher = new MessageWatcher(this.store);
@@ -326,7 +339,8 @@ class RPCServer {
       // Start watching
       const options = {
         chatId: chat_id,
-        sinceRowID: since_rowid
+        sinceRowID: since_rowid,
+        debounceMs: resolvedDebounceMs
       };
 
       await watcher.start(options);
