@@ -15,7 +15,17 @@ class MessageStore {
   }
 
   /**
-   * Open database connection
+   * Open database connection.
+   *
+   * On failure, the error message is shaped so that OpenClaw's
+   * `normalizeIMessageFullDiskAccessError` heuristic (it lowercases the
+   * stderr line and looks for both `full disk access` and `chat.db`) can
+   * recognize the Full Disk Access case and surface a friendly hint to the
+   * user instead of a bare `imsg rpc exited (code 1)`.
+   *
+   * Detection prefers the SQLite error code (`SQLITE_CANTOPEN`) and falls
+   * back to substring match on the message; other SQLite errors keep their
+   * original wording so we don't misreport unrelated failures as FDA.
    */
   async connect() {
     try {
@@ -24,7 +34,34 @@ class MessageStore {
       this.db.pragma('busy_timeout = 5000');
       await this.detectSchema();
     } catch (error) {
-      throw new Error(`Failed to open database: ${error.message}`);
+      const code = error && error.code;
+      const msg = (error && error.message) || String(error);
+      // SQLite + better-sqlite3 surface "DB cannot be opened" through
+      // several variants depending on the underlying cause (permission,
+      // missing file, missing dir, raw I/O error). For this CLI the db
+      // path is fixed (~/Library/Messages/chat.db), so any of these
+      // really do mean "we can't read chat.db" — almost always FDA in
+      // practice on macOS. Cast a wide net to maximize the chance
+      // OpenClaw's FDA heuristic picks up the hint.
+      const cantOpenLike =
+        code === 'SQLITE_CANTOPEN' ||
+        /unable to open database file/i.test(msg) ||
+        /cannot open database/i.test(msg) ||
+        /does not exist/i.test(msg) ||
+        /disk i\/o error/i.test(msg) ||
+        /permission denied/i.test(msg);
+
+      if (cantOpenLike) {
+        throw new Error(
+          `Cannot open chat.db (${this.dbPath}). ` +
+            `Likely missing Full Disk Access. ` +
+            `Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access ` +
+            `for the process launching imsg (node / OpenClaw / launchd), then retry. ` +
+            `(underlying: ${msg})`
+        );
+      }
+
+      throw new Error(`Failed to open database: ${msg}`);
     }
   }
 
