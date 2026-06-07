@@ -243,6 +243,41 @@ class RPCServer {
   }
 
   /**
+   * U6: enrich messages with group/chat metadata by joining against
+   * getChatInfo + getParticipants. Cache per-call to avoid N+1 when a
+   * batch contains many messages from the same chat. The cache returned
+   * can be re-used across messages by callers (e.g. watch's per-event
+   * push) — see this._chatCache for the long-lived variant.
+   */
+  async enrichMessageWithChatMeta(msg, cache) {
+    const chatId = msg.chat_id;
+    if (chatId === null || chatId === undefined) {
+      return { chat_identifier: '', chat_guid: '', is_group: false, participants: [] };
+    }
+    if (cache.has(chatId)) return cache.get(chatId);
+
+    let chatInfo = null;
+    let participants = [];
+    try {
+      chatInfo = await this.store.getChatInfo(chatId);
+      participants = await this.store.getParticipants(chatId);
+    } catch (_) {
+      // Best-effort enrichment; never break the response on missing chat.
+    }
+    const chat_identifier = chatInfo ? chatInfo.identifier || '' : '';
+    const chat_guid = chatInfo ? chatInfo.guid || '' : '';
+    const is_group =
+      (Array.isArray(participants) && participants.length > 1) ||
+      // v0.5.0 #42 convention: group chats use ;+; prefix in identifier/guid
+      /;\+;/.test(chat_identifier) ||
+      /;\+;/.test(chat_guid);
+
+    const meta = { chat_identifier, chat_guid, is_group, participants };
+    cache.set(chatId, meta);
+    return meta;
+  }
+
+  /**
    * Handle messages.history method
    */
   async handleMessagesHistory(id, params) {
@@ -265,18 +300,28 @@ class RPCServer {
 
       const messages = await this.store.getMessages(chat_id, limit, options);
 
-      // Format messages according to spec
-      const formattedMessages = messages.map(msg => ({
-        id: msg.id,
-        chat_id: msg.chat_id,
-        guid: msg.guid || '',
-        sender: msg.sender,
-        text: msg.text || '',
-        created_at: msg.created_at ? msg.created_at.toISOString() : new Date().toISOString(),
-        is_from_me: msg.is_from_me,
-        attachments: attachments ? msg.attachments || [] : [],
-        reactions: msg.reactions || []
-      }));
+      // U6: enrich with chat metadata so callers can route on
+      // is_group / chat_guid without an extra chats.list roundtrip.
+      const chatCache = new Map();
+      const formattedMessages = [];
+      for (const msg of messages) {
+        const meta = await this.enrichMessageWithChatMeta(msg, chatCache);
+        formattedMessages.push({
+          id: msg.id,
+          chat_id: msg.chat_id,
+          chat_identifier: meta.chat_identifier,
+          chat_guid: meta.chat_guid,
+          is_group: meta.is_group,
+          participants: meta.participants,
+          guid: msg.guid || '',
+          sender: msg.sender,
+          text: msg.text || '',
+          created_at: msg.created_at ? msg.created_at.toISOString() : new Date().toISOString(),
+          is_from_me: msg.is_from_me,
+          attachments: attachments ? msg.attachments || [] : [],
+          reactions: msg.reactions || []
+        });
+      }
 
       this.sendResponse(id, { messages: formattedMessages });
     } catch (error) {
@@ -310,14 +355,24 @@ class RPCServer {
     try {
       const watcher = new MessageWatcher(this.store);
       const subscriptionId = this.nextSubscriptionId++;
+      // U6: per-subscription chat metadata cache. Long-lived for the
+      // life of the subscription; if a chat is renamed mid-session,
+      // the old name is displayed until the subscription restarts.
+      // Accepted trade-off — see plan U6 Approach + Risks.
+      const subChatCache = new Map();
 
       // Set up message handler
-      watcher.on('message', (message) => {
+      watcher.on('message', async (message) => {
+        const meta = await this.enrichMessageWithChatMeta(message, subChatCache);
         this.sendNotification('message', {
           subscription: subscriptionId,
           message: {
             id: message.id,
             chat_id: message.chat_id,
+            chat_identifier: meta.chat_identifier,
+            chat_guid: meta.chat_guid,
+            is_group: meta.is_group,
+            participants: meta.participants,
             guid: message.guid || '',
             sender: message.sender,
             text: message.text || '',
