@@ -4,6 +4,32 @@ const MessageSender = require('./sender');
 const { getStatusPayload } = require('./status');
 
 /**
+ * Bridge-only methods upstream openclaw/imsg exposes via its IMCore
+ * private-API bridge. imsg-legacy serves macOS 11+ via AppleScript and
+ * cannot implement these. We return a structured "not supported"
+ * response (data.supported=false) instead of METHOD_NOT_FOUND so the
+ * OpenClaw client knows it's a deliberate decline, not a stale rpc_methods
+ * list. The methods are also absent from `rpc_methods` (see status.js)
+ * so a well-behaved client never calls them in the first place — this
+ * is the belt-and-suspenders fallback.
+ */
+const BRIDGE_ONLY_METHODS = new Set([
+  'send.rich',
+  'send.attachment',
+  'tapback',
+  'message.edit',
+  'message.unsend',
+  'message.delete',
+  'message.notifyAnyways',
+  'handles.check',
+  'poll.send',
+  'messages.poll.send',
+  'message.send_status',
+  'typing',
+  'read'
+]);
+
+/**
  * JSON-RPC 2.0 error codes
  */
 const ERROR_CODES = {
@@ -146,12 +172,36 @@ class RPCServer {
         break;
 
       default:
-        this.sendError(id, {
-          code: ERROR_CODES.METHOD_NOT_FOUND,
-          message: 'Method not found',
-          data: method
-        });
+        if (BRIDGE_ONLY_METHODS.has(method)) {
+          this.sendNotSupported(id, method);
+        } else {
+          this.sendError(id, {
+            code: ERROR_CODES.METHOD_NOT_FOUND,
+            message: 'Method not found',
+            data: method
+          });
+        }
     }
+  }
+
+  /**
+   * Send a structured "method is known but unsupported on this build"
+   * response for bridge-only methods. Different from METHOD_NOT_FOUND
+   * (which means "I don't recognize this name"): the client can read
+   * data.supported === false and learn that retrying is pointless.
+   */
+  sendNotSupported(id, method) {
+    this.sendError(id, {
+      code: ERROR_CODES.METHOD_NOT_FOUND,
+      message: 'Method not supported on this build',
+      data: {
+        method,
+        reason:
+          'requires IMCore private-API bridge (macOS 14+); imsg-legacy ' +
+          'serves the macOS 11+ AppleScript path',
+        supported: false
+      }
+    });
   }
 
   /**
