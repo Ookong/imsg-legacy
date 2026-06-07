@@ -424,7 +424,7 @@ class RPCServer {
     try {
       const sender = new MessageSender();
 
-      await sender.send({
+      const sent = await sender.send({
         recipient: to || '',
         text: text || '',
         attachmentPath: file || '',
@@ -434,7 +434,17 @@ class RPCServer {
         chatGUID: chat_guid || ''
       });
 
-      this.sendResponse(id, { ok: true });
+      // U5: surface guid/chat_guid/service on the wire so OpenClaw can
+      // ack the send and (when supported) drive message.send_status
+      // polling. AppleScript path can't observe a stable message GUID,
+      // so guid/id are empty strings rather than missing.
+      this.sendResponse(id, {
+        ok: true,
+        id: sent && sent.id ? sent.id : '',
+        guid: sent && sent.guid ? sent.guid : '',
+        chat_guid: sent && sent.chat_guid ? sent.chat_guid : (chat_guid || ''),
+        service: sent && sent.service ? sent.service : (service || '')
+      });
     } catch (error) {
       this.sendError(id, {
         code: ERROR_CODES.INTERNAL_ERROR,
