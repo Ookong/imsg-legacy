@@ -10,8 +10,8 @@ require('./commands/watch')(program);
 require('./commands/status')(program);
 require('./commands/rpc')(program);
 
-// Version and help
-program.version('1.0.2');
+// Version and help — read from package.json so we have a single source of truth
+program.version(require('../package.json').version);
 program.description('iMessage CLI tool for macOS 11+ (Big Sur)');
 
 program.parse(process.argv);

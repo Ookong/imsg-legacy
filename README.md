@@ -136,8 +136,61 @@ Fully compatible with [steipete/imsg](https://github.com/steipete/imsg) and Open
 ### Messages Output (JSONL)
 
 ```json
-{"id":1234,"chat_id":1,"sender":"+15551234567","text":"Hello!","date":"2026-03-08T10:30:00.000Z","is_from_me":false,"service":"iMessage","attachments_count":0}
+{"id":1234,"chat_id":1,"chat_identifier":"+15551234567","chat_guid":"iMessage;-;+15551234567","is_group":false,"participants":["+15551234567"],"guid":"...","sender":"+15551234567","text":"Hello!","created_at":"2026-03-08T10:30:00.000Z","is_from_me":false,"attachments":[],"reactions":[]}
 ```
+
+> Field name note: the message timestamp field is **`created_at`** (ISO 8601). Earlier README examples used `date` — that was always a documentation mismatch; the code has emitted `created_at` since v1.0.0.
+
+## OpenClaw Integration
+
+This build aligns with the **OpenClaw 2026.5.12+ probe contract** (upstream openclaw/imsg v0.6.0+ surface area, AppleScript path only):
+
+- `imsg status --json` returns the `StatusPayload` shape (version, basic/advanced features, `rpc_methods`, etc.) so OpenClaw can discover capabilities without spawning the RPC server
+- `imsg rpc` emits a JSON-RPC 2.0 error envelope on stdout when startup fails (v0.8.2 behavior) — OpenClaw parses it instead of seeing a bare `exited (code 1)`
+- chat.db open failures throw an error containing the literal phrases `Full Disk Access` and `chat.db`, which OpenClaw's `normalizeIMessageFullDiskAccessError` matches to surface a friendly UI hint
+- `watch.subscribe` accepts a `debounce_ms` parameter (default 500ms, clamped to ≥ 50ms)
+- `send` RPC responses include `id`, `guid`, `chat_guid`, `service` (best-effort; empty strings when AppleScript can't observe them)
+- `messages.history` / `watch.subscribe` push messages now carry `chat_identifier`, `chat_guid`, `is_group`, `participants`
+
+### Capabilities Reported via `status --json`
+
+```bash
+imsg status --json | jq .
+```
+
+Sample output:
+
+```json
+{
+  "version": "1.1.0",
+  "basic_features": true,
+  "advanced_features": false,
+  "typing_indicators": false,
+  "read_receipts": false,
+  "sip": "unknown",
+  "message": "imsg-legacy on Node.js (AppleScript path, macOS 11+ / Big Sur and later)",
+  "bridge_version": 0,
+  "v2_ready": false,
+  "selectors": {},
+  "rpc_methods": ["chats.list", "messages.history", "watch.subscribe", "watch.unsubscribe", "send", "status"]
+}
+```
+
+### Not Implemented (Bridge-Only, macOS 14+)
+
+The following upstream RPC methods require the IMCore private-API bridge and are **not implemented** on the macOS 11+ AppleScript path. They are absent from `rpc_methods` and respond with a structured `not_supported` error (`error.data.supported === false`) if called anyway:
+
+`send.rich`, `send.attachment`, `tapback`, `message.edit`, `message.unsend`, `message.delete`, `message.notifyAnyways`, `handles.check`, `poll.send`, `messages.poll.send`, `message.send_status`, `typing`, `read`
+
+Users needing these features should run the upstream `openclaw/imsg` on macOS 14 or later.
+
+### Troubleshooting OpenClaw Spawning
+
+If OpenClaw reports `imsg rpc not ready` despite this build being installed:
+
+1. **PATH** — OpenClaw's launchd-managed gateway does not inherit `~/.local/bin`. Set `channels.imessage.cliPath` in `~/.openclaw/openclaw.json` to the absolute path of `imsg` (typically `/Users/<you>/.local/bin/imsg`)
+2. **Full Disk Access** — Grant FDA in System Settings → Privacy & Security → Full Disk Access. macOS TCC checks the *responsible process*, which for OpenClaw's launchd chain is whatever sits at the top of the exec chain. If you use a bash/sh wrapper between launchd and node, that interpreter (e.g. `/bin/sh` or `/bin/bash`) needs FDA too — they are separate entries in TCC
+3. **Re-kickstart** after configuration changes: `launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway`
 
 ## Testing
 

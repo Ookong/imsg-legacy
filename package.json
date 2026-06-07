@@ -1,6 +1,6 @@
 {
   "name": "imsg-legacy",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "iMessage CLI tool for macOS 11+ (Big Sur)",
   "main": "src/index.js",
   "bin": {
@@ -19,8 +19,8 @@
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
-    "chokidar": "^3.5.0",
-    "commander": "^11.0.0",
+    "chokidar": "^5.0.0",
+    "commander": "^14.0.3",
     "libphonenumber-js": "^1.10.0"
   },
   "engines": {
