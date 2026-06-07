@@ -1,6 +1,7 @@
 const readline = require('readline');
 const MessageWatcher = require('./watcher');
 const MessageSender = require('./sender');
+const { getStatusPayload } = require('./status');
 
 /**
  * JSON-RPC 2.0 error codes
@@ -138,6 +139,10 @@ class RPCServer {
 
       case 'send':
         await this.handleSend(id, params);
+        break;
+
+      case 'status':
+        await this.handleStatus(id, params);
         break;
 
       default:
@@ -370,6 +375,22 @@ class RPCServer {
       this.sendError(id, {
         code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Failed to send message',
+        data: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle status method - returns the same capability payload as
+   * `imsg status --json` (single source of truth in src/lib/status.js).
+   */
+  async handleStatus(id, params) {
+    try {
+      this.sendResponse(id, getStatusPayload());
+    } catch (error) {
+      this.sendError(id, {
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Failed to get status',
         data: error.message
       });
     }

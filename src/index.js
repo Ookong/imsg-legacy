@@ -7,10 +7,11 @@ require('./commands/chats')(program);
 require('./commands/history')(program);
 require('./commands/send')(program);
 require('./commands/watch')(program);
+require('./commands/status')(program);
 require('./commands/rpc')(program);
 
 // Version and help
-program.version('1.0.0');
+program.version('1.0.2');
 program.description('iMessage CLI tool for macOS 11+ (Big Sur)');
 
 program.parse(process.argv);
