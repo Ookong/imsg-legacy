@@ -10,6 +10,14 @@ module.exports = function(program) {
     .command('rpc')
     .description('Run JSON-RPC server over stdin/stdout (for OpenClaw integration)')
     .option('-d, --db <path>', 'Path to Messages database')
+    // U9: OpenClaw 6.8 always spawns `imsg rpc --json` (per upstream
+    // openclaw/imsg v0.11.0 contract). The flag is a "I will only emit
+    // JSON" declaration — and imsg-legacy's RPC server already emits
+    // strict JSONL on stdout (and, per U3, a JSON-RPC error envelope on
+    // startup failure). Accepting the flag but ignoring its effect is
+    // the correct compat move; refusing it (commander's default) makes
+    // OpenClaw see `unknown option` and exit 1.
+    .option('--json', 'Emit strict JSONL on stdout (default behavior; flag accepted for OpenClaw 6.8 compatibility)')
     .action(async (options) => {
       try {
         const store = new MessageStore(options.db);
