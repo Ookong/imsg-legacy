@@ -189,8 +189,115 @@ Users needing these features should run the upstream `openclaw/imsg` on macOS 14
 If OpenClaw reports `imsg rpc not ready` despite this build being installed:
 
 1. **PATH** — OpenClaw's launchd-managed gateway does not inherit `~/.local/bin`. Set `channels.imessage.cliPath` in `~/.openclaw/openclaw.json` to the absolute path of `imsg` (typically `/Users/<you>/.local/bin/imsg`)
-2. **Full Disk Access** — Grant FDA in System Settings → Privacy & Security → Full Disk Access. macOS TCC checks the *responsible process*, which for OpenClaw's launchd chain is whatever sits at the top of the exec chain. If you use a bash/sh wrapper between launchd and node, that interpreter (e.g. `/bin/sh` or `/bin/bash`) needs FDA too — they are separate entries in TCC
+2. **Full Disk Access** — See the dedicated section below — **[OpenClaw Launch Chain & Full Disk Access](#openclaw-launch-chain--full-disk-access)** — for why you likely need `/bin/sh` FDA and how to verify it.
 3. **Re-kickstart** after configuration changes: `launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway`
+
+### OpenClaw Launch Chain & Full Disk Access
+
+> **TL;DR — if OpenClaw's `imsg rpc` can read `chat.db` from your shell but not when spawned by the gateway, the most common cause is that `/bin/sh` (or `/bin/bash`, whichever OpenClaw's launchd wrapper currently uses) is missing Full Disk Access. Grant it in System Settings → Privacy & Security → Full Disk Access.**
+
+OpenClaw's macOS gateway runs under `launchd` (LaunchAgent `ai.openclaw.gateway`). Its program arguments are:
+
+```xml
+<string>/Users/Jay/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh</string>
+<string>/Users/Jay/.openclaw/service-env/ai.openclaw.gateway.env</string>
+<string>/usr/local/bin/node</string>
+<string>/Users/Jay/.local/lib/node_modules/openclaw/dist/index.js</string>
+<string>gateway</string>
+<string>--port</string>
+<string>18789</string>
+```
+
+So the actual exec chain is:
+
+```
+launchd
+  → /Users/Jay/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh   (interpreter: /bin/sh)
+  → /usr/local/bin/node
+  → spawn(/Users/Jay/.local/bin/imsg, ['rpc', '--json'])
+  → /Users/Jay/.local/bin/imsg → /usr/local/bin/node → read ~/Library/Messages/chat.db
+```
+
+#### Why `/bin/sh` specifically needs FDA
+
+macOS TCC (Transparency, Consent, and Control) checks the **responsible process** when a process opens files in protected directories like `~/Library/Messages`. The responsible process is the first non-platform binary that `launchd` exec'd into. With OpenClaw's wrapper chain, that's the wrapper script — but its *interpreter* is what TCC records, and the interpreter is `/bin/sh` (or `/bin/bash` if you patched the shebang).
+
+The two are **separate TCC entries**:
+- `/bin/bash` — only useful if the wrapper's `#!/bin/bash`
+- `/bin/sh` — only useful if the wrapper's `#!/bin/sh`
+
+OpenClaw periodically regenerates `service-env/*.env` and the wrapper script on upgrade. If the regenerated wrapper's shebang is `#!/bin/sh` and your TCC entry is only on `/bin/bash`, the gateway will lose FDA silently — no error from the launchd side, but every read of `chat.db` returns `EPERM`.
+
+#### What to grant
+
+OpenClaw's stock wrapper uses `#!/bin/sh`. Grant Full Disk Access to **`/bin/sh`**. This is the persistent, upgrade-proof fix.
+
+If you have previously patched the wrapper to `#!/bin/bash` and want to keep that working, you must grant FDA to `/bin/bash` instead — but note that OpenClaw upgrades may rewrite the wrapper and you'll be back to `#!/bin/sh`, at which point the `/bin/bash` grant stops helping.
+
+**Grant both `/bin/sh` and `/bin/bash` if you want to be safe across upgrades** — they're independent entries.
+
+#### Step-by-step
+
+1. Open **System Settings → Privacy & Security → Full Disk Access**.
+2. Click `+` to add an entry.
+3. Press `⌘⇧G` to enter a path manually.
+4. Type `/bin/sh` (or `/bin/bash` or both). macOS Finder will not let you navigate to `/bin` via the standard file picker — `⌘⇧G` is the only path.
+5. Enable the checkbox next to the new entry.
+6. Quit and re-launch **any** apps that previously had FDA and you want to keep working (sometimes the Settings app needs this to apply).
+7. Re-kickstart the gateway: `launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway`
+
+#### Verify FDA is actually applied
+
+The Settings UI checkbox can lie — the TCC database is the source of truth. Check it directly:
+
+```bash
+sqlite3 /Library/Application\ Support/com.apple/TCC/TCC.db \
+  "SELECT client, auth_value FROM access
+   WHERE service='kTCCServiceSystemPolicyAllFiles'
+   AND (client='/bin/sh' OR client='/bin/bash');"
+```
+
+`auth_value = 2` means granted. Anything else (1 = denied, 4 = unknown) means TCC doesn't consider it authorized.
+
+Then verify the actual launch chain can read `chat.db` end-to-end. The following launches a synthetic child process through the same `launchd → wrapper → node` chain OpenClaw uses, and tries to read the database:
+
+```bash
+cat > /tmp/fda-verify.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.fda-verify</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/Jay/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh</string>
+    <string>/Users/Jay/.openclaw/service-env/ai.openclaw.gateway.env</string>
+    <string>/usr/local/bin/node</string>
+    <string>-e</string>
+    <string>try{const r=require('fs').readFileSync('/Users/Jay/Library/Messages/chat.db');console.log('OK len='+r.length)}catch(e){console.log('FAIL:'+e.code+':'+e.message)}</string>
+  </array>
+  <key>StandardOutPath</key><string>/tmp/fda-verify.out</string>
+  <key>StandardErrorPath</key><string>/tmp/fda-verify.err</string>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+EOF
+launchctl load -w /tmp/fda-verify.plist
+sleep 2
+cat /tmp/fda-verify.out
+launchctl unload /tmp/fda-verify.plist
+rm -f /tmp/fda-verify.plist /tmp/fda-verify.out /tmp/fda-verify.err
+```
+
+Expected output: `OK len=<some bytes>`. If you see `FAIL:EPERM:...` the responsible process on the chain is not FDA-authorized — grant whichever binary the wrapper's shebang points to (`/bin/sh` by default).
+
+#### What this looks like from the OpenClaw side
+
+imsg-legacy emits an error message containing the literal phrases `Full Disk Access` and `chat.db` when the database open fails (since v1.1.0). OpenClaw's client matches those substrings and surfaces the friendly UI hint:
+
+```
+imsg cannot access ~/Library/Messages/chat.db.
+Grant Full Disk Access to the Gateway/launcher process and restart Gateway.
+```
+
+If you see this in the OpenClaw UI, jump to "Step-by-step" above.
 
 ## Testing
 
