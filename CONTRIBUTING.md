@@ -27,7 +27,7 @@ imsg watch --chat-id 1 --json
 - Use ES6+ features (async/await, arrow functions)
 - Follow existing code formatting
 - Add comments for complex logic
-- Ensure JSON output remains compatible with steipete/imsg
+- Ensure JSON output remains compatible with openclaw/imsg
 
 ## Submitting Changes
 
@@ -39,7 +39,7 @@ imsg watch --chat-id 1 --json
 
 ## Compatibility Requirements
 
-- Must maintain JSON output compatibility with steipete/imsg
+- Must maintain JSON output compatibility with openclaw/imsg
 - Must support macOS 11+ (Big Sur)
 - Must not break existing OpenClaw integration
 
@@ -55,7 +55,7 @@ The project uses automated keyword-based testing. When adding new features:
 
 1. Add automated tests using the keyword verification pattern
 2. Test with different macOS versions if possible
-3. Verify JSON output format matches steipete/imsg
+3. Verify JSON output format matches openclaw/imsg
 4. Test error handling (permissions, database access, etc.)
 
 ## Questions?

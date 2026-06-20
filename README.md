@@ -2,7 +2,7 @@
 
 iMessage CLI tool for macOS 11+ (Big Sur)
 
-A Node.js implementation compatible with [steipete/imsg](https://github.com/steipete/imsg), designed for legacy Mac systems that cannot run macOS 14+.
+A Node.js implementation compatible with [openclaw/imsg](https://github.com/openclaw/imsg) (formerly steipete/imsg), designed for legacy Mac systems that cannot run macOS 14+.
 
 ## Compatibility
 
@@ -125,7 +125,7 @@ imsg watch --since 1000
 
 ## JSON Output Format
 
-Fully compatible with [steipete/imsg](https://github.com/steipete/imsg) and OpenClaw imsg plugin.
+Fully compatible with [openclaw/imsg](https://github.com/openclaw/imsg) and OpenClaw imsg plugin.
 
 ### Chats Output (JSONL)
 
@@ -409,7 +409,7 @@ npm install
 
 ## Acknowledgments
 
-Based on [steipete/imsg](https://github.com/steipete/imsg), adapted for macOS 11+ and rewritten in Node.js for easier distribution on legacy systems.
+Based on [openclaw/imsg](https://github.com/openclaw/imsg), adapted for macOS 11+ and rewritten in Node.js for easier distribution on legacy systems.
 
 ## License
 

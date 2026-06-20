@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **imsg**, an iMessage CLI tool for macOS 11+ (Big Sur). It uses AppleScript to control Messages.app, providing compatibility with legacy Mac systems that cannot run macOS 14+. This is a Node.js implementation compatible with [steipete/imsg](https://github.com/steipete/imsg).
+This is **imsg**, an iMessage CLI tool for macOS 11+ (Big Sur). It uses AppleScript to control Messages.app, providing compatibility with legacy Mac systems that cannot run macOS 14+. This is a Node.js implementation compatible with [openclaw/imsg](https://github.com/openclaw/imsg) (formerly steipete/imsg).
 
 ### Key Architecture
 
 - **Language**: Node.js (requires 14.0.0 or later)
 - **Core Mechanism**: Uses AppleScript to interface with Messages.app
-- **Compatibility**: Output format compatible with steipete/imsg
+- **Compatibility**: Output format compatible with openclaw/imsg
 - **Integration**: OpenClaw support for bidirectional messaging
 
 ### Project Structure
@@ -60,7 +60,7 @@ node test/test-suite.js
 
 ### Output Formats
 
-All tools output JSON/JSONL by default for compatibility with steipete/imsg:
+All tools output JSON/JSONL by default for compatibility with openclaw/imsg:
 
 **Chats output (JSONL):**
 ```json
@@ -107,7 +107,7 @@ The project includes comprehensive automated testing:
 
 All tests use random keyword generation for automated verification, eliminating manual checking.
 
-### Compatibility with steipete/imsg
+### Compatibility with openclaw/imsg (formerly steipete/imsg)
 
 This implementation maintains **full compatibility** with the original Swift version:
 - ✅ Command name: `imsg` (consistent with original)
