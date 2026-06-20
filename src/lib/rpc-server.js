@@ -1,6 +1,33 @@
 const readline = require('readline');
 const MessageWatcher = require('./watcher');
 const MessageSender = require('./sender');
+const { getStatusPayload } = require('./status');
+
+/**
+ * Bridge-only methods upstream openclaw/imsg exposes via its IMCore
+ * private-API bridge. imsg-legacy serves macOS 11+ via AppleScript and
+ * cannot implement these. We return a structured "not supported"
+ * response (data.supported=false) instead of METHOD_NOT_FOUND so the
+ * OpenClaw client knows it's a deliberate decline, not a stale rpc_methods
+ * list. The methods are also absent from `rpc_methods` (see status.js)
+ * so a well-behaved client never calls them in the first place — this
+ * is the belt-and-suspenders fallback.
+ */
+const BRIDGE_ONLY_METHODS = new Set([
+  'send.rich',
+  'send.attachment',
+  'tapback',
+  'message.edit',
+  'message.unsend',
+  'message.delete',
+  'message.notifyAnyways',
+  'handles.check',
+  'poll.send',
+  'messages.poll.send',
+  'message.send_status',
+  'typing',
+  'read'
+]);
 
 /**
  * JSON-RPC 2.0 error codes
@@ -23,6 +50,27 @@ class RPCServer {
     this.subscriptions = new Map();
     this.nextSubscriptionId = 1;
     this.rl = null;
+  }
+
+  /**
+   * Build a JSON-RPC 2.0 error envelope string for a startup-time failure.
+   *
+   * v0.8.2 of upstream imsg made stdout strictly JSONL even when the
+   * server cannot start: OpenClaw's client reads the first line, and an
+   * envelope here lets it surface a parsed error instead of a bare
+   * "imsg rpc exited (code 1)". `id` is null per JSON-RPC 2.0 §5.1.
+   */
+  static buildStartupErrorEnvelope(error) {
+    const msg = (error && error.message) || String(error);
+    return JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: {
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: msg,
+        data: { phase: 'startup', stage: 'db_connect' }
+      }
+    });
   }
 
   /**
@@ -119,13 +167,41 @@ class RPCServer {
         await this.handleSend(id, params);
         break;
 
+      case 'status':
+        await this.handleStatus(id, params);
+        break;
+
       default:
-        this.sendError(id, {
-          code: ERROR_CODES.METHOD_NOT_FOUND,
-          message: 'Method not found',
-          data: method
-        });
+        if (BRIDGE_ONLY_METHODS.has(method)) {
+          this.sendNotSupported(id, method);
+        } else {
+          this.sendError(id, {
+            code: ERROR_CODES.METHOD_NOT_FOUND,
+            message: 'Method not found',
+            data: method
+          });
+        }
     }
+  }
+
+  /**
+   * Send a structured "method is known but unsupported on this build"
+   * response for bridge-only methods. Different from METHOD_NOT_FOUND
+   * (which means "I don't recognize this name"): the client can read
+   * data.supported === false and learn that retrying is pointless.
+   */
+  sendNotSupported(id, method) {
+    this.sendError(id, {
+      code: ERROR_CODES.METHOD_NOT_FOUND,
+      message: 'Method not supported on this build',
+      data: {
+        method,
+        reason:
+          'requires IMCore private-API bridge (macOS 14+); imsg-legacy ' +
+          'serves the macOS 11+ AppleScript path',
+        supported: false
+      }
+    });
   }
 
   /**
@@ -167,6 +243,41 @@ class RPCServer {
   }
 
   /**
+   * U6: enrich messages with group/chat metadata by joining against
+   * getChatInfo + getParticipants. Cache per-call to avoid N+1 when a
+   * batch contains many messages from the same chat. The cache returned
+   * can be re-used across messages by callers (e.g. watch's per-event
+   * push) — see this._chatCache for the long-lived variant.
+   */
+  async enrichMessageWithChatMeta(msg, cache) {
+    const chatId = msg.chat_id;
+    if (chatId === null || chatId === undefined) {
+      return { chat_identifier: '', chat_guid: '', is_group: false, participants: [] };
+    }
+    if (cache.has(chatId)) return cache.get(chatId);
+
+    let chatInfo = null;
+    let participants = [];
+    try {
+      chatInfo = await this.store.getChatInfo(chatId);
+      participants = await this.store.getParticipants(chatId);
+    } catch (_) {
+      // Best-effort enrichment; never break the response on missing chat.
+    }
+    const chat_identifier = chatInfo ? chatInfo.identifier || '' : '';
+    const chat_guid = chatInfo ? chatInfo.guid || '' : '';
+    const is_group =
+      (Array.isArray(participants) && participants.length > 1) ||
+      // v0.5.0 #42 convention: group chats use ;+; prefix in identifier/guid
+      /;\+;/.test(chat_identifier) ||
+      /;\+;/.test(chat_guid);
+
+    const meta = { chat_identifier, chat_guid, is_group, participants };
+    cache.set(chatId, meta);
+    return meta;
+  }
+
+  /**
    * Handle messages.history method
    */
   async handleMessagesHistory(id, params) {
@@ -189,18 +300,28 @@ class RPCServer {
 
       const messages = await this.store.getMessages(chat_id, limit, options);
 
-      // Format messages according to spec
-      const formattedMessages = messages.map(msg => ({
-        id: msg.id,
-        chat_id: msg.chat_id,
-        guid: msg.guid || '',
-        sender: msg.sender,
-        text: msg.text || '',
-        created_at: msg.created_at ? msg.created_at.toISOString() : new Date().toISOString(),
-        is_from_me: msg.is_from_me,
-        attachments: attachments ? msg.attachments || [] : [],
-        reactions: msg.reactions || []
-      }));
+      // U6: enrich with chat metadata so callers can route on
+      // is_group / chat_guid without an extra chats.list roundtrip.
+      const chatCache = new Map();
+      const formattedMessages = [];
+      for (const msg of messages) {
+        const meta = await this.enrichMessageWithChatMeta(msg, chatCache);
+        formattedMessages.push({
+          id: msg.id,
+          chat_id: msg.chat_id,
+          chat_identifier: meta.chat_identifier,
+          chat_guid: meta.chat_guid,
+          is_group: meta.is_group,
+          participants: meta.participants,
+          guid: msg.guid || '',
+          sender: msg.sender,
+          text: msg.text || '',
+          created_at: msg.created_at ? msg.created_at.toISOString() : new Date().toISOString(),
+          is_from_me: msg.is_from_me,
+          attachments: attachments ? msg.attachments || [] : [],
+          reactions: msg.reactions || []
+        });
+      }
 
       this.sendResponse(id, { messages: formattedMessages });
     } catch (error) {
@@ -216,19 +337,42 @@ class RPCServer {
    * Handle watch.subscribe method
    */
   async handleWatchSubscribe(id, params) {
-    const { chat_id = null, since_rowid, participants, attachments = false, include_reactions = false } = params;
+    const {
+      chat_id = null,
+      since_rowid,
+      participants,
+      attachments = false,
+      include_reactions = false,
+      debounce_ms
+    } = params;
+
+    // v0.6.0 contract: client may set debounce_ms; default 500ms (matches
+    // upstream's watcher debounce). Clamp tiny values to 50ms so a
+    // client-side bug can't turn this into a poll-storm.
+    let resolvedDebounceMs = typeof debounce_ms === 'number' ? debounce_ms : 500;
+    if (resolvedDebounceMs < 50) resolvedDebounceMs = 50;
 
     try {
       const watcher = new MessageWatcher(this.store);
       const subscriptionId = this.nextSubscriptionId++;
+      // U6: per-subscription chat metadata cache. Long-lived for the
+      // life of the subscription; if a chat is renamed mid-session,
+      // the old name is displayed until the subscription restarts.
+      // Accepted trade-off — see plan U6 Approach + Risks.
+      const subChatCache = new Map();
 
       // Set up message handler
-      watcher.on('message', (message) => {
+      watcher.on('message', async (message) => {
+        const meta = await this.enrichMessageWithChatMeta(message, subChatCache);
         this.sendNotification('message', {
           subscription: subscriptionId,
           message: {
             id: message.id,
             chat_id: message.chat_id,
+            chat_identifier: meta.chat_identifier,
+            chat_guid: meta.chat_guid,
+            is_group: meta.is_group,
+            participants: meta.participants,
             guid: message.guid || '',
             sender: message.sender,
             text: message.text || '',
@@ -250,7 +394,8 @@ class RPCServer {
       // Start watching
       const options = {
         chatId: chat_id,
-        sinceRowID: since_rowid
+        sinceRowID: since_rowid,
+        debounceMs: resolvedDebounceMs
       };
 
       await watcher.start(options);
@@ -334,7 +479,7 @@ class RPCServer {
     try {
       const sender = new MessageSender();
 
-      await sender.send({
+      const sent = await sender.send({
         recipient: to || '',
         text: text || '',
         attachmentPath: file || '',
@@ -344,11 +489,37 @@ class RPCServer {
         chatGUID: chat_guid || ''
       });
 
-      this.sendResponse(id, { ok: true });
+      // U5: surface guid/chat_guid/service on the wire so OpenClaw can
+      // ack the send and (when supported) drive message.send_status
+      // polling. AppleScript path can't observe a stable message GUID,
+      // so guid/id are empty strings rather than missing.
+      this.sendResponse(id, {
+        ok: true,
+        id: sent && sent.id ? sent.id : '',
+        guid: sent && sent.guid ? sent.guid : '',
+        chat_guid: sent && sent.chat_guid ? sent.chat_guid : (chat_guid || ''),
+        service: sent && sent.service ? sent.service : (service || '')
+      });
     } catch (error) {
       this.sendError(id, {
         code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Failed to send message',
+        data: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle status method - returns the same capability payload as
+   * `imsg status --json` (single source of truth in src/lib/status.js).
+   */
+  async handleStatus(id, params) {
+    try {
+      this.sendResponse(id, getStatusPayload());
+    } catch (error) {
+      this.sendError(id, {
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Failed to get status',
         data: error.message
       });
     }

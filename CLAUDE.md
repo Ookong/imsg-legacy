@@ -69,8 +69,10 @@ All tools output JSON/JSONL by default for compatibility with steipete/imsg:
 
 **Messages output (JSONL):**
 ```json
-{"id":1234,"chat_id":1,"sender":"+1234567890","text":"Hello!","date":"2026-03-08T10:30:00.000Z","is_from_me":false,"service":"iMessage","attachments_count":0}
+{"id":1234,"chat_id":1,"chat_identifier":"+1234567890","chat_guid":"iMessage;-;+1234567890","is_group":false,"participants":["+1234567890"],"guid":"...","sender":"+1234567890","text":"Hello!","created_at":"2026-03-08T10:30:00.000Z","is_from_me":false,"attachments":[],"reactions":[]}
 ```
+
+> The timestamp field is `created_at` (ISO 8601). Earlier docs referenced `date` — that was a documentation error; the code has always emitted `created_at`.
 
 **Watcher events (JSON):**
 ```json
@@ -112,3 +114,17 @@ This implementation maintains **full compatibility** with the original Swift ver
 - ✅ JSON output format: Fully compatible
 - ✅ All core features: chats, history, send, watch
 - ✅ OpenClaw imsg plugin compatible
+
+### OpenClaw 2026.5.12+ Contract Surface (v0.6.0–v0.9.0)
+
+imsg-legacy follows the upstream OpenClaw contract for AppleScript-only deployments. Implemented:
+
+- `imsg status --json` → `StatusPayload` (version, `rpc_methods`, `advanced_features=false`, etc.) — capability probe
+- `imsg rpc` startup failures emit a JSON-RPC 2.0 error envelope on stdout (v0.8.2)
+- chat.db open failures throw messages containing `Full Disk Access` + `chat.db` for OpenClaw's FDA normalizer
+- `watch.subscribe` accepts `debounce_ms` (default 500ms, min 50ms) (v0.6.0)
+- `send` response includes `id` / `guid` / `chat_guid` / `service` (best-effort) (v0.6.0 / v0.10.0)
+- Messages in `messages.history` and `watch.subscribe` push notifications carry `chat_identifier` / `chat_guid` / `is_group` / `participants` (v0.6.0)
+- Bridge methods (`send.rich`, `tapback`, `message.edit`/`unsend`/`delete`, `typing`, `read`, `handles.check`, `poll.send`, etc.) respond with structured `not_supported` (`error.data.supported=false`); they are also absent from `rpc_methods`
+
+**Not implemented (product boundary, by design):** IMCore private-API bridge — requires macOS 14+ and is Apple-restricted. imsg-legacy serves the macOS 11+ AppleScript path; users needing bridge features should run upstream openclaw/imsg on macOS 14+.

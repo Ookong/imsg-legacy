@@ -19,6 +19,9 @@ class MessageWatcher extends EventEmitter {
   async start(options = {}) {
     const {
       chatId = null,
+      // U4: debounceMs is now driven by RPC `watch.subscribe.debounce_ms`
+      // (default 500ms, clamped to >= 50ms at the RPC layer). The previous
+      // 250ms default is preserved for direct CLI use (`imsg watch`).
       debounceMs = 250,
       batchLimit = 100
     } = options;

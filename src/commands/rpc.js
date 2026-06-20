@@ -33,6 +33,13 @@ module.exports = function(program) {
 
         store.close();
       } catch (error) {
+        // v0.8.2 behavior: imsg rpc stdout must stay strict JSONL even on
+        // startup failure, so OpenClaw's stdin reader sees a structured
+        // JSON-RPC 2.0 error envelope (id: null) instead of "imsg rpc
+        // exited (code 1)" with no detail. Stderr still carries the
+        // human-readable diagnostic — which (after U2) contains the FDA
+        // keywords OpenClaw's normalizer matches on.
+        process.stdout.write(RPCServer.buildStartupErrorEnvelope(error) + '\n');
         console.error('Error:', error.message);
         process.exit(1);
       }

@@ -119,8 +119,14 @@ class MessageSender {
   }
 
   /**
-   * Send message via AppleScript
-   * Based on MessageSender.swift sendViaAppleScript()
+   * Send message via AppleScript.
+   *
+   * U5: return shape now includes the fields OpenClaw expects on the
+   * `send` RPC response (guid, chat_guid, service, id). AppleScript's
+   * Messages dictionary doesn't expose the GUID of the just-sent
+   * message in a stable cross-version way, so guid/id are best-effort
+   * empty strings rather than null — keeping the fields present makes
+   * downstream consumers' destructuring safe.
    */
   sendViaAppleScript(options, chatTarget, useChat) {
     const script = this.getAppleScript();
@@ -139,7 +145,22 @@ class MessageSender {
         execFileSync('/usr/bin/osascript', ['-l', 'AppleScript', '-', ...args], {
           input: script
         });
-        resolve({ success: true });
+        // Resolved service name OpenClaw reflects in UI (e.g. "iMessage" vs "SMS").
+        // Normalize 'imessage'/'sms' to display-cased values upstream uses.
+        const serviceOut =
+          options.service === 'sms'
+            ? 'SMS'
+            : options.service === 'imessage'
+            ? 'iMessage'
+            : options.service || '';
+
+        resolve({
+          success: true,
+          id: '',                          // AppleScript path can't observe sent rowid pre-commit
+          guid: '',                        // AppleScript path can't observe message GUID
+          chat_guid: useChat ? chatTarget : (options.chatGUID || ''),
+          service: serviceOut
+        });
       } catch (error) {
         reject(new Error(`AppleScript failed: ${error.message}`));
       }
