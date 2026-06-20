@@ -53,3 +53,6 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Plans (local-only planning docs; not for version control)
+docs/plans/
