@@ -115,6 +115,24 @@ This implementation maintains **full compatibility** with the original Swift ver
 - ✅ All core features: chats, history, send, watch
 - ✅ OpenClaw imsg plugin compatible
 
+### Upstream Lineage
+
+imsg-legacy 1.0.0 is an **incomplete Node.js port of `openclaw/imsg` v0.5.0** (released 2026-02-16; imsg-legacy 1.0.0 released 2026-03-08, 20 days later).
+
+Evidence the fork base is **v0.5.0** (not v0.4.0):
+- `src/lib/database.js` `detectSchema()` probes for `thread_originator_guid` and `destination_caller_id` columns — these were **introduced in v0.5.0**, do not exist in v0.4.0
+- `parseMessage()` returns `thread_originator_guid` and `destination_caller_id` fields on every message — fields exist in v0.5.0 `OutputModels.swift` but not in v0.4.0
+- However, values are always empty strings (`''`); `getMessages()` does not SELECT these columns — **schema copied, implementation not ported**
+
+Evidence the port is **incomplete** (functions in v0.5.0 but NOT in imsg-legacy 1.0.0):
+- `imsg react` command — tapback reactions via UI automation
+- `imsg typing` command + RPC typing method
+- `is_reaction` / `reaction_type` / `reaction_emoji` / `is_reaction_add` / `reacted_to_guid` fields in message payloads
+- `--reactions` flag on `imsg watch`
+- `include_reactions` parameter on RPC `watch.subscribe` (exposed in interface but never populated — placeholder for future implementation)
+
+The 1.1.0 release added `chat_identifier` / `chat_guid` / `is_group` / `participants` fields (from v0.6.0) and the `status --json` capability probe (v0.6.0+) but did not backport the v0.5.0 reaction/typing features.
+
 ### OpenClaw 2026.5.12+ Contract Surface (v0.6.0–v0.9.0)
 
 imsg-legacy follows the upstream OpenClaw contract for AppleScript-only deployments. Implemented:
