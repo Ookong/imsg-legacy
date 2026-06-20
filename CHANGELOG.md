@@ -4,7 +4,7 @@
 
 ### 🔌 OpenClaw 2026.5.12 Compatibility
 
-This release closes the contract gap between imsg-legacy (forked from upstream v0.5.0) and what OpenClaw 2026.5.12 needs to probe and drive an iMessage channel cleanly. The complete plan is in [`docs/plans/2026-06-08-001-feat-imsg-openclaw-compat-plan.md`](docs/plans/2026-06-08-001-feat-imsg-openclaw-compat-plan.md).
+This release closes the contract gap between imsg-legacy (forked from upstream v0.5.0) and what OpenClaw 2026.5.12 needs to probe and drive an iMessage channel cleanly. The eight implementation units (status command, FDA-aware errors, JSON-RPC startup envelope, watch debounce, send response fields, group metadata, structured not_supported for bridge methods, docs + version) are listed below.
 
 ### Added
 
