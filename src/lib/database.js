@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const os = require('os');
+const attributedBodyParser = require('./attributed-body-parser');
 
 /**
  * MessageStore - Access Messages database on macOS
@@ -204,14 +205,28 @@ class MessageStore {
   }
 
   /**
-   * Parse attributedBody (simplified implementation)
-   * Based on TypedStreamParser.swift
-   * For now, just return the fallback text
+   * Parse attributedBody.
+   *
+   * Mirrors the upstream Swift `TypedStreamParser.parseAttributedBody(data)`
+   * ported to Node.js (see `src/lib/attributed-body-parser.js`). When
+   * `body` is a typedstream buffer (i.e. `m.attributedBody` was non-NULL
+   * and the schema carries the column), delegate to the ported parser.
+   * Otherwise fall back to the supplied `fallback` (preserves the
+   * pre-fix behaviour for messages where `m.text` was already populated
+   * by the SELECT).
+   *
+   * For group chats / @mentions the canonical case is `m.text IS NULL,
+   * m.attributedBody IS NOT NULL` — iOS writes rich content there. This
+   * function previously returned the fallback (empty string) and made
+   * OpenClaw lose `@如意` style mentions. Upgraded by U1 port.
+   *
+   * Returns `''` (never throws) for malformed typedstream — mirrors the
+   * `String(bytes:encoding:)?.trimmingLeadingControlCharacters() ?? ""`
+   * upstream contract.
    */
   parseAttributedBody(body, fallback) {
     if (!body || !this.hasAttributedBody) return fallback;
-    // TODO: Implement full NSAttributedString parsing if needed
-    return fallback;
+    return attributedBodyParser.parseAttributedBody(body) || fallback;
   }
 
   /**
