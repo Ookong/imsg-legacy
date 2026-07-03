@@ -4,7 +4,26 @@
 > **登记人：** 如意（MK-000）
 > **指派：** 筋斗云（如意专属 Claude Code）
 > **优先级：** P1
-> **状态：** 🔴 Open
+> **状态：** ✅ Resolved（2026-07-04 01:30 GMT+8）
+
+## 解决
+
+本 bug 实际由**两个独立问题**叠加导致，已分别修复：
+
+| 子问题 | 根因 | 修复 | 详情 |
+|--------|------|------|------|
+| **入站**（群消息不触发 session）| OpenClaw `channels.imessage.groups` 配置缺失 | 猴哥修改 `~/.openclaw/openclaw.json` 添加 `groups: {"*": {"requireMention": false}}` 并重启 gateway | 见 `docs/investigations/2026-07-04-group-chat-full-debug-timeline.md` §2.3 |
+| **出站**（session 内回复发不到群）| `imsg send --chat-guid` 因 commander.js camelCase 转换丢失参数 | commit `1e0ad52`：`src/commands/send.js` 改 `chatGUID` → `chatGuid`；`src/lib/sender.js` 兼容两种命名 | 见 `docs/BUGFIX-camelCase-chat-guid.md` |
+
+## 原分析（保留作历史记录 — 部分不准确）
+
+下方"根因分析"和"评估"章节保留了 00:02 时的初始诊断。该诊断**只对了一半**：
+
+- ✅ **层 1（OpenClaw groups 配置缺失）**——这一项方向正确，最终的 fix 也确实补齐了 groups 配置
+- ❌ **层 2（attributedBody 解析）评估为"无关"**——结论保留（plan 006 baseline 实证确认 0/11 非自发自空 text）
+- ⚠️ **未发现**——出站方向存在独立的 commander.js camelCase bug，导致即使入站触发 session 后，session 内的回复也发不到群聊
+
+下方"方案需求"章节基于不完整的诊断提出，目前已被实际 fix 取代。
 
 ---
 

@@ -240,3 +240,36 @@ ROWID 5041-5047 是 IcePaw agent 在 chat 237 群里的工具调用输出。这�
 - [ ] 检查 OpenClaw 是否在用 imsg-legacy 的 `imsg rpc watch.subscribe`（log 搜 `watch.subscribe` 调用）
 - [ ] 如果 OpenClaw 不用 imsg-legacy watch：检查它自己的 chat.db 订阅为什么漏了 chat 237
 - [ ] 决定 plan 007 是改 imsg-legacy 端（加独立 db watcher）还是 OpenClaw 端（修 imessage monitor chat_id 过滤）
+
+---
+
+## Addendum（2026-07-04 01:35 GMT+8）
+
+**本报告对 plan 007 的路径推荐被实际 debug 推翻**：实际 fix 不在 OpenClaw imessage monitor，也不在 imsg-legacy，而是两个独立问题叠加：
+
+### 实际 fix
+
+| 子问题 | 根因 | 修复 | 修复者 |
+|--------|------|------|--------|
+| **入站**（群消息不触发 session）| OpenClaw `channels.imessage.groups` 配置缺失 | 添加 `groups: {"*": {"requireMention": false}}` 并重启 gateway | 猴哥（~00:47）|
+| **出站**（session 内回复发不到群）| `src/commands/send.js` 用了 `options.chatGUID`（大写 D），commander.js 实际存 `options.chatGuid`（小写 d）| commit `1e0ad52`：`send.js` 改 `chatGuid`；`sender.js` 兼容两种命名 | 如意（01:24）|
+
+### 本报告哪里错了
+
+1. **"A 路径" 的判定是基于 log 缺失**——但 OpenClaw 的 `imessage:group:237` 成功 dispatch 不一定在 logVerbose 级别留痕。**log 0 引用 ≠ "没收到"**。实际入站在 00:39 就已修好（猴哥手动验证），但本报告的 capture 是 00:48-00:53 跑，反而把"已修好"误读成"未修"。
+2. **完全错过出站 bug**——`imsg send --chat-guid` 群聊发送完全不可用，但这跟 watch emit / OpenClaw session 触发是两套代码路径，**本报告的实证方法无法发现**。
+3. **plan 005 "加 groups 配置" 推荐方向实际正确**——本报告之前因 "log 0 引用" 推断 groups 配置无效，是错的。猴哥实际落实的就是 plan 005 的方案。
+
+### 教训
+
+- **log 缺失不是"功能缺失"的金标准**——OpenClaw 的 `logVerbose` 级别 drop 在 INFO log 看不到；需要主动把 `OPENCLAW_LOG_LEVEL=debug` 拉满才能下结论
+- **自动化数据采集 vs 实际用户复现**：plan 006 的 5min capture 适合排查 imsg-legacy → OpenClaw **入站**链路的固定 bug，但**出站** send 路径需要 live user + AppleScript 对比验证才能定位（commit `1e0ad52` 的修复方法就是这个路径）
+- **经验性文档比一次性 fix 报告更有价值**——`docs/investigations/2026-07-04-group-chat-full-debug-timeline.md`（如意的全程记录）才是真正 carry lessons 的文档
+
+### 关联
+
+- `docs/BUGFIX-camelCase-chat-guid.md` — 出站 bug 详细 fix
+- `docs/investigations/2026-07-04-group-chat-full-debug-timeline.md` — 全程 debug timeline
+- `docs/BUG-group-chat-no-session-trigger.md` — 原 bug 报告（已标 Resolved）
+- commit `1e0ad52` — 出站 fix
+- `~/.openclaw/openclaw.json` — 入站 fix（猴哥改）
