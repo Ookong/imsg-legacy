@@ -34,10 +34,16 @@ else
 fi
 
 if [ -n "$TIMEOUT_CMD" ]; then
-  "$TIMEOUT_CMD" "$DURATION" imsg watch --json --db ~/Library/Messages/chat.db > "$OUT" 2> "$ERR" || true
+  # imsg 默认 chat.db 路径是 ~/Library/Messages/chat.db（见 src/lib/database.js:14）；CLI 没 --db option
+  "$TIMEOUT_CMD" "$DURATION" imsg watch --json > "$OUT" 2> "$ERR" || true
 else
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: no timeout/gtimeout available; using perl fallback"
-  perl -e "alarm $DURATION; exec @ARGV" imsg watch --json --db ~/Library/Messages/chat.db > "$OUT" 2> "$ERR" || true
+  # perl -e 后接单参数 exec 不可靠；改用 alarm() 包裹的 system 调用
+  perl -e '
+    $SIG{ALRM} = sub { print STDERR "capture: timeout reached\n"; exit 0 };
+    alarm shift @ARGV;
+    exec("imsg", "watch", "--json") or die "exec failed: $!";
+  ' "$DURATION" > "$OUT" 2> "$ERR" || true
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Watch complete"
