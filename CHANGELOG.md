@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.2] - 2026-07-04
+
+### 🐛 Bug Fixes
+
+- **Group chat send** — `imsg send --chat-guid <guid>` now actually targets the group chat. Previously the `--chat-guid` flag was silently ignored because `src/commands/send.js` read `options.chatGUID` (capital D) while commander.js stores it as `options.chatGuid` (lowercase d), so the GUID defaulted to `''` and `resolveChatTarget()` always took the single-chat path. The send response still claimed `Message sent successfully!` while routing the message to a DM. Now `send.js` passes the correct key and `sender.js` accepts both spellings defensively. See `docs/BUGFIX-camelCase-chat-guid.md` and commit `1e0ad52`.
+
+### 🔧 Internal
+
+- **Baseline capture scripts** — `scripts/capture-imsg-watch-baseline.sh`, `scripts/capture-openclaw-baseline.sh`, `scripts/parse-imsg-watch-baseline.py`, `scripts/parse-openclaw-baseline.py`, `scripts/correlate-baseline.py` for reproducing group-chat reception diagnostics. Not user-facing; kept under `scripts/` for the next time OpenClaw's `imessage:` channel misbehaves. See `docs/investigations/2026-07-04-group-chat-baseline.md`.
+
+### Compatibility
+
+- AppleScript path (macOS 11–15) — no change
+- OpenClaw contract surface — no change
+
+---
+
 ## [1.1.0] - 2026-06-08
 
 ### 🔌 OpenClaw 2026.5.12 Compatibility
