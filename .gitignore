@@ -56,3 +56,6 @@ temp/
 
 # Plans (local-only planning docs; not for version control)
 docs/plans/
+
+# Investigations (local-only debug records; not for version control)
+docs/investigations/
