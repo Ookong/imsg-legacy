@@ -25,8 +25,9 @@ class MessageSender {
       service = 'imessage',
       region = 'US',
       chatIdentifier = '',
-      chatGUID = ''
+      chatGUID: chatGUIDRaw
     } = options;
+    const chatGUID = chatGUIDRaw || options.chatGuid || '';
 
     let resolved = {
       recipient,
@@ -62,7 +63,7 @@ class MessageSender {
    * Based on MessageSender.swift resolveChatTarget()
    */
   resolveChatTarget(options) {
-    const guid = (options.chatGUID || '').trim();
+    const guid = (options.chatGUID || options.chatGuid || '').trim();
     const identifier = (options.chatIdentifier || '').trim();
 
     if (identifier && this.looksLikeHandle(identifier)) {
@@ -158,7 +159,7 @@ class MessageSender {
           success: true,
           id: '',                          // AppleScript path can't observe sent rowid pre-commit
           guid: '',                        // AppleScript path can't observe message GUID
-          chat_guid: useChat ? chatTarget : (options.chatGUID || ''),
+          chat_guid: useChat ? chatTarget : (options.chatGUID || options.chatGuid || ''),
           service: serviceOut
         });
       } catch (error) {

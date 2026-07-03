@@ -26,7 +26,7 @@ module.exports = function(program) {
           service: options.service,
           region: options.region,
           chatIdentifier: options.chatIdentifier || '',
-          chatGUID: options.chatGUID || ''
+          chatGuid: options.chatGuid || ''
         });
 
         console.log('Message sent successfully!');
