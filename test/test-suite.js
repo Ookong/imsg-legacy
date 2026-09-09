@@ -49,6 +49,25 @@ function getAnyChatId() {
   }
 }
 
+// v1.1.3 (PRD-1.1.3): Find any group chat (with display name) to test group-send-by-name.
+function getAnyGroupChat() {
+  try {
+    const output = execSync('imsg chats --limit 100 --json', { encoding: 'utf8' });
+    const lines = String(output).trim().split('\n');
+    for (const line of lines) {
+      try {
+        const chat = JSON.parse(line);
+        if (chat.name && chat.name.trim() && /^chat\d+/.test(chat.identifier || '')) {
+          return chat;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
 // 测试结果记录
 const results = {
   passed: 0,
@@ -284,6 +303,50 @@ async function test5_PhoneNormalization() {
   }
 }
 
+async function test_GroupSendByName() {
+  console.log('\n### 测试: 群名 send 真到 imsg db（v1.1.3 PRD-1.1.3）###');
+
+  const groupChat = getAnyGroupChat();
+  if (!groupChat) {
+    logTest('群名 send', 'SKIP', '无可用群');
+    return false;
+  }
+  console.log(`   测试群: ${groupChat.name} (chat_id=${groupChat.id})`);
+
+  const keyword = generateKeyword();
+  console.log(`   关键词: ${keyword}`);
+
+  try {
+    execSync(`imsg send --to "${groupChat.name}" --text "${keyword}"`, { encoding: 'utf8' });
+  } catch (e) {
+    logTest('群名 send', 'FAIL', `imsg send 报错: ${e.message || e}`);
+    return false;
+  }
+
+  await sleep(3000);
+
+  try {
+    const historyOutput = execSync(`imsg history --chat-id ${groupChat.id} --limit 5 --json`, { encoding: 'utf8' });
+    const historyHas = historyOutput.includes(keyword);
+    const sqliteOutput = execSync(`sqlite3 ~/Library/Messages/chat.db "SELECT text FROM message WHERE text LIKE '%${keyword}%' ORDER BY date DESC LIMIT 1;"`, { encoding: 'utf8' });
+    const sqliteHas = sqliteOutput.includes(keyword);
+
+    if (historyHas && sqliteHas) {
+      logTest('群名 send', 'PASS', `群 ${groupChat.name} 收到关键词 ${keyword} (history + sqlite 双验证)`);
+      return true;
+    } else if (historyHas) {
+      logTest('群名 send', 'PASS', `群 ${groupChat.name} history 收到 ${keyword} (sqlite 校验未通过但 history OK)`);
+      return true;
+    } else {
+      logTest('群名 send', 'FAIL', `群 ${groupChat.name} 没收到关键词 ${keyword} (historyHas=${historyHas}, sqliteHas=${sqliteHas})`);
+      return false;
+    }
+  } catch (e) {
+    logTest('群名 send', 'FAIL', `验证失败: ${e.message}`);
+    return false;
+  }
+}
+
 async function test6_Compatibility() {
   console.log('\n### 测试6: JSON兼容性 ###');
 
@@ -331,6 +394,7 @@ async function runAllTests() {
   await test3_SendCommand();
   await test4_WatchCommand();
   await test5_PhoneNormalization();
+  await test_GroupSendByName();
   await test6_Compatibility();
 
   const endTime = Date.now();

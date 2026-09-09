@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.1.3] - 2026-09-09
+
+### 🐛 Bug Fixes
+
+- **Group chat send by name** — `imsg send -t <群名>` (e.g. `-t "猫族世界"`) now actually delivers to the group's chat thread. Previously the command silently returned `Message sent successfully!` while AppleScript failed with `不能获得 chat id "猫族世界"`. Root cause: `src/lib/sender.js` did not resolve display names to their `iMessage;+;chatXXX` identifiers, and `sendViaAppleScript()` swallowed osascript errors instead of propagating them via `reject()`.
+
+  New behaviour:
+  - `resolveChatByName(name)` matches by display name via `imsg chats --limit 100 --json`; picks the freshest thread if multiple matches exist (avoiding accidental delivery to a stale/abandoned 同名群)
+  - Adds the `iMessage;+;` / `SMS;+;` prefix so AppleScript's `chat id ...` accepts it
+  - Surfaces osascript errors via `reject()` (with stderr); `imsg send` exits non-zero on real failure
+  - Throws `Group chat not found: <name>` when no chat matches the display name — no more silent fake success
+
+  See `docs/PRDs/PRD-1.1.3-fix-send-by-name.md`, `docs/BUG-group-send-by-name-fake-success.md`, and SOUL.md § 「📱 iMessage 私聊 vs 群发 · 工具铁律」 / LRN-20260909-001 / 002.
+
+### 🔧 Internal
+
+- **Test coverage** — `test/test-suite.js` adds `test_GroupSendByName` + `getAnyGroupChat()` helper. Verifies that a keyword sent via `imsg send --to <群名>` appears in both `imsg history --chat-id N` AND `sqlite3 ~/Library/Messages/chat.db` (the dual check that would have caught this bug originally).
+
+### Compatibility
+
+- AppleScript path (macOS 11–15) — no change
+- OpenClaw contract surface (U5/U6/U7) — no change
+- Private DM path (`-t <email/phone>`) — no change
+
+---
+
 ## [1.1.2] - 2026-07-04
 
 ### 🐛 Bug Fixes

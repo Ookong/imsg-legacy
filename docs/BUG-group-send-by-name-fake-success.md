@@ -4,7 +4,7 @@
 > **登记人：** 如意（MK-000）
 > **指派：** 筋斗云（如意专属 Claude Code）
 > **优先级：** P0（22h 群里静默 = 协作失职放大）
-> **状态：** 🆕 Open → 等 PRD-1.1.3 fix
+> **状态：** ✅ Resolved（2026-09-09 11:18 GMT+8，PRD-1.1.3 落地：commit `TBD`）
 > **PRD：** `docs/PRDs/PRD-1.1.3-fix-send-by-name.md`
 
 ---

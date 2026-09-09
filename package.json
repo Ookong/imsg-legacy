@@ -1,6 +1,6 @@
 {
   "name": "imsg-legacy",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "iMessage CLI tool for macOS 11+ (Big Sur)",
   "main": "src/index.js",
   "bin": {

@@ -8,6 +8,9 @@ const PhoneNumberNormalizer = require('./normalizer');
 /**
  * MessageSender - Send iMessages via AppleScript
  * Based on MessageSender.swift from the original imsg project
+ *
+ * v1.1.3 (PRD-1.1.3): Added resolveChatByName() for group name → chat-id resolution
+ * and fixed sendViaAppleScript() to surface errors instead of swallowing them.
  */
 class MessageSender {
   constructor() {
@@ -39,8 +42,24 @@ class MessageSender {
     };
 
     // Resolve chat target
-    const chatTarget = this.resolveChatTarget(resolved);
-    const useChat = chatTarget.length > 0;
+    let chatTarget = this.resolveChatTarget(resolved);
+    let useChat = chatTarget.length > 0;
+
+    // v1.1.3 (PRD-1.1.3): If recipient is a group display name (not a handle/chat-id),
+    // resolve it to the real chat identifier via imsg chats --json, then route through
+    // the chat-id path. Without this, AppleScript fails because chat id "猫族世界"
+    // is not a valid chat identifier — AppleScript needs `iMessage;+;chatXXX` form.
+    if (!useChat && resolved.recipient && !this.looksLikeHandle(resolved.recipient)) {
+      const resolvedChat = await this.resolveChatByName(resolved.recipient);
+      if (resolvedChat && resolvedChat.chat_guid) {
+        resolved.chatGUID = resolvedChat.chat_guid;
+        chatTarget = resolvedChat.chat_guid;
+        useChat = true;
+      } else {
+        // v1.1.3: Surface clear error, do not silently fake success
+        throw new Error(`Group chat not found: ${resolved.recipient}`);
+      }
+    }
 
     if (!useChat) {
       // Normalize recipient
@@ -79,11 +98,77 @@ class MessageSender {
   }
 
   /**
+   * v1.1.3 (PRD-1.1.3): Resolve a group chat display name to its real chat identifier.
+   * Reads `imsg chats --limit 50 --json` (JSONL output) and matches by name (strict equality).
+   *
+   * @param {string} name - Group display name (e.g. "猫族世界")
+   * @returns {Promise<{identifier: string, id: number, service: string} | null>}
+   */
+  async resolveChatByName(name) {
+    if (!name || typeof name !== 'string') return null;
+    const target = name.trim();
+    if (!target) return null;
+
+    const { execFileSync } = require('child_process');
+    let output;
+    try {
+      output = execFileSync('imsg', ['chats', '--limit', '100', '--json'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+    } catch (err) {
+      return null;
+    }
+
+    // v1.1.3: Collect all matches and pick the most recently active one.
+    // Multiple chats can share a display name (e.g. an active 群 vs. a leftover old 群).
+    // Without this guard, imsg could deliver to the wrong (often abandoned) thread.
+    const matches = [];
+    const lines = String(output).trim().split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let chat;
+      try {
+        chat = JSON.parse(line);
+      } catch (e) {
+        continue;
+      }
+      const chatName = (chat.name || '').trim();
+      if (chatName === target) {
+        matches.push({
+          identifier: chat.identifier || '',
+          id: chat.id,
+          service: chat.service || 'iMessage',
+          last_message_at: chat.last_message_at || ''
+        });
+      }
+    }
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return matches[0];
+
+    // Sort by last_message_at desc; pick the freshest
+    matches.sort((a, b) => {
+      const ta = Date.parse(a.last_message_at) || 0;
+      const tb = Date.parse(b.last_message_at) || 0;
+      return tb - ta;
+    });
+    const winner = matches[0];
+    // v1.1.3: AppleScript chat id must be in `iMessage;+;<chat-identifier>` form
+    // (or `SMS;+;...` for SMS groups). chat.identifier from imsg chats --json is
+    // the bare identifier; AppleScript rejects "chat id "chat24930803106700483"".
+    const svc = (winner.service || 'iMessage').toLowerCase();
+    const prefix = svc.startsWith('sms') ? 'SMS;+;' : 'iMessage;+;';
+    const fullGuid = winner.identifier ? `${prefix}${winner.identifier}` : '';
+    return Object.assign({}, winner, { chat_guid: fullGuid, identifier: winner.identifier });
+  }
+
+  /**
    * Check if value looks like a handle (phone/email)
    * Based on MessageSender.swift looksLikeHandle()
    */
   looksLikeHandle(value) {
-    const trimmed = value.trim();
+    const trimmed = (value || '').trim();
     if (!trimmed) return false;
 
     const lower = trimmed.toLowerCase();
@@ -128,6 +213,11 @@ class MessageSender {
    * message in a stable cross-version way, so guid/id are best-effort
    * empty strings rather than null — keeping the fields present makes
    * downstream consumers' destructuring safe.
+   *
+   * v1.1.3 (PRD-1.1.3): Errors from osascript are now surfaced via reject()
+   * instead of being swallowed by an earlier resolve(). Before this fix,
+   `imsg send -t <群名>` would log "Message sent successfully!" even though
+   AppleScript had thrown "不能获得 chat id '猫族世界'" — a classic false-success.
    */
   sendViaAppleScript(options, chatTarget, useChat) {
     const script = this.getAppleScript();
@@ -143,11 +233,13 @@ class MessageSender {
 
     return new Promise((resolve, reject) => {
       try {
-        execFileSync('/usr/bin/osascript', ['-l', 'AppleScript', '-', ...args], {
-          input: script
+        const stdout = execFileSync('/usr/bin/osascript', ['-l', 'AppleScript', '-', ...args], {
+          input: script,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe']
         });
+
         // Resolved service name OpenClaw reflects in UI (e.g. "iMessage" vs "SMS").
-        // Normalize 'imessage'/'sms' to display-cased values upstream uses.
         const serviceOut =
           options.service === 'sms'
             ? 'SMS'
@@ -157,13 +249,16 @@ class MessageSender {
 
         resolve({
           success: true,
-          id: '',                          // AppleScript path can't observe sent rowid pre-commit
-          guid: '',                        // AppleScript path can't observe message GUID
+          id: '',
+          guid: '',
           chat_guid: useChat ? chatTarget : (options.chatGUID || options.chatGuid || ''),
-          service: serviceOut
+          service: serviceOut,
+          _stdout: stdout || ''
         });
       } catch (error) {
-        reject(new Error(`AppleScript failed: ${error.message}`));
+        // v1.1.3: Surface full stderr to caller — no more swallowed errors
+        const stderr = (error && error.stderr) ? String(error.stderr).trim() : (error && error.message) || String(error);
+        reject(new Error(`AppleScript failed (useChat=${useChat ? '1' : '0'}, chatTarget='${chatTarget}'): ${stderr}`));
       }
     });
   }
@@ -209,8 +304,8 @@ class MessageSender {
               send theFile to targetBuddy
             end if
           end if
-        end tell
-      end run
+      end tell
+    end run
     `;
   }
 }
